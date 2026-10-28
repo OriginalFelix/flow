@@ -40,8 +40,6 @@ import com.vaadin.flow.component.UI;
  * <p>
  * One instance is owned by each {@link VaadinService}, see
  * {@link VaadinService#getSessionUIService()}.
- *
- * @since 25.4
  */
 public class SessionUIService {
 

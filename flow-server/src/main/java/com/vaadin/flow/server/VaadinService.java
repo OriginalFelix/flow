@@ -1001,7 +1001,6 @@ public abstract class VaadinService implements Serializable {
      * service.
      *
      * @return the session UI service, not {@code null}
-     * @since 25.4
      */
     public SessionUIService getSessionUIService() {
         SessionUIService result = sessionUIService;
