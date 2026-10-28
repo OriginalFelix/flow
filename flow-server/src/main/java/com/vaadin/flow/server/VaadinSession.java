@@ -102,7 +102,13 @@ public class VaadinSession implements HttpSessionBindingListener, Serializable {
     private LinkedList<RequestHandler> requestHandlers = new LinkedList<>();
 
     private int nextUIId = 0;
-    private transient Map<Integer, UI> uIs = new HashMap<>();
+
+    /*
+     * Holds the UIs while no SessionUIService of a VaadinService is reachable,
+     * i.e. after deserialization until refreshTransients has been called, or
+     * when the service does not provide one (e.g. mocks in tests).
+     */
+    private transient SessionUIService localUIService;
 
     protected WebBrowser browser = new WebBrowser();
 
@@ -617,7 +623,7 @@ public class VaadinSession implements HttpSessionBindingListener, Serializable {
      */
     public Collection<UI> getUIs() {
         checkHasLock();
-        return Collections.unmodifiableCollection(uIs.values());
+        return getUIService().getUIs(this);
     }
 
     /**
@@ -631,7 +637,7 @@ public class VaadinSession implements HttpSessionBindingListener, Serializable {
      */
     public UI getUIById(int uiId) {
         checkHasLock();
-        return uIs.get(uiId);
+        return getUIService().getUIById(this, uiId);
     }
 
     /**
@@ -712,7 +718,7 @@ public class VaadinSession implements HttpSessionBindingListener, Serializable {
         assert ui != null : "Removed UI cannot be null";
         assert UI.getCurrent().getUIId() == ui.getUIId() : "UIs don't match";
         ui.getInternals().setSession(null);
-        uIs.remove(ui.getUIId());
+        getUIService().removeUI(this, ui);
     }
 
     /**
@@ -977,7 +983,34 @@ public class VaadinSession implements HttpSessionBindingListener, Serializable {
                     "The UI belongs to a different session");
         }
 
-        uIs.put(ui.getUIId(), ui);
+        getUIService().addUI(this, ui);
+    }
+
+    /**
+     * Gets the service holding the UIs of this session. This is the
+     * {@link SessionUIService} of the {@link VaadinService} when available.
+     * Otherwise a session local fallback is used, whose UIs are moved over as
+     * soon as the service becomes available.
+     *
+     * @return the UI service to use, not {@code null}
+     */
+    private SessionUIService getUIService() {
+        VaadinService vaadinService = getService();
+        SessionUIService uiService = vaadinService == null ? null
+                : vaadinService.getSessionUIService();
+        if (uiService == null) {
+            if (localUIService == null) {
+                localUIService = new SessionUIService();
+            }
+            return localUIService;
+        }
+        if (localUIService != null) {
+            for (UI ui : localUIService.removeSession(this)) {
+                uiService.addUI(this, ui);
+            }
+            localUIService = null;
+        }
+        return uiService;
     }
 
     public VaadinService getService() {
@@ -1185,7 +1218,11 @@ public class VaadinSession implements HttpSessionBindingListener, Serializable {
             requestHandlers.remove(null);
             destroyListeners.remove(null);
 
-            uIs = (Map<Integer, UI>) stream.readObject();
+            Map<Integer, UI> uis = (Map<Integer, UI>) stream.readObject();
+            // The service is not yet known, keep the UIs locally until
+            // refreshTransients is called
+            localUIService = new SessionUIService();
+            uis.values().forEach(ui -> localUIService.addUI(this, ui));
             resourceRegistry = (StreamResourceRegistry) stream.readObject();
             pendingAccessQueue = new ConcurrentLinkedQueue<>();
             localeSignal = new ValueSignal<>(locale);
@@ -1216,7 +1253,11 @@ public class VaadinSession implements HttpSessionBindingListener, Serializable {
 
             stream.defaultWriteObject();
             if (serializeUIs) {
-                stream.writeObject(uIs);
+                // Same stream format as before: Map<Integer, UI>
+                Map<Integer, UI> uis = new HashMap<>();
+                getUIService().getUIs(this)
+                        .forEach(ui -> uis.put(ui.getUIId(), ui));
+                stream.writeObject(uis);
                 stream.writeObject(resourceRegistry);
             } else {
                 stream.writeObject(new HashMap<>());
@@ -1244,6 +1285,8 @@ public class VaadinSession implements HttpSessionBindingListener, Serializable {
         session = wrappedSession;
         service = vaadinService;
         refreshLock();
+        // Moves UIs restored by deserialization to the service
+        getUIService();
     }
 
     /**

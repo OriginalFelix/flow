@@ -172,6 +172,12 @@ public abstract class VaadinService implements Serializable {
     private final VaadinServiceEventBus eventBus = new VaadinServiceEventBus(
             this);
 
+    /*
+     * Lazily (re)created, so that it is also available after the service has
+     * been deserialized. UIs are serialized as part of their session.
+     */
+    private transient volatile SessionUIService sessionUIService;
+
     private SystemMessagesProvider systemMessagesProvider = DefaultSystemMessagesProvider
             .get();
 
@@ -991,6 +997,27 @@ public abstract class VaadinService implements Serializable {
     }
 
     /**
+     * Gets the service that stores the UIs of all sessions belonging to this
+     * service.
+     *
+     * @return the session UI service, not {@code null}
+     * @since 25.4
+     */
+    public SessionUIService getSessionUIService() {
+        SessionUIService result = sessionUIService;
+        if (result == null) {
+            synchronized (this) {
+                result = sessionUIService;
+                if (result == null) {
+                    result = new SessionUIService();
+                    sessionUIService = result;
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
      * Adds a listener that gets notified when a new UI has been initialized.
      *
      * @param listener
@@ -1182,6 +1209,7 @@ public abstract class VaadinService implements Serializable {
             eventBus.fireEvent(event, sessionErrorHandler(session));
 
             session.setState(VaadinSessionState.CLOSED);
+            getSessionUIService().removeSession(session);
         });
     }
 
