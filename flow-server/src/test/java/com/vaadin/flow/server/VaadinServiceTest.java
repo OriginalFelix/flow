@@ -1228,7 +1228,7 @@ class VaadinServiceTest {
      * {@link VaadinService#findVaadinSession(VaadinRequest)}.
      */
     private static VaadinSession createSessionForNewRequest(
-            VaadinService service) throws Exception {
+            VaadinServletService service) throws Exception {
         ReentrantLock lock = new ReentrantLock();
         WrappedSession wrappedSession = new WrappedHttpSession(
                 mock(HttpSession.class)) {
